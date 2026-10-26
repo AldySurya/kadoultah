@@ -61,21 +61,15 @@ const videoEmpty = document.getElementById('video-empty');
 function setupLocalVideo() {
   if (!localVideo) return;
   const rawSrc = (typeof CONFIG !== 'undefined' && (CONFIG.video || CONFIG.youtube)) ? String(CONFIG.video || CONFIG.youtube).trim() : 'lagu-kita.mp4';
-  // jika user masih isi youtube link, coba ekstrak? tapi sekarang pakai file lokal
   let src = rawSrc;
-  // jika isinya link youtube (legacy), jangan pakai sebagai src video
   if (/youtu\.?be|youtube\.com/.test(src)) {
     console.warn('[video] CONFIG.video berisi link YouTube, ganti ke file mp4 lokal seperti "lagu-kita.mp4"');
     src = 'lagu-kita.mp4';
   }
   if (!src) src = 'lagu-kita.mp4';
-
-  // encode URI untuk spasi
   const encoded = encodeURI(src);
   localVideo.src = encoded;
   localVideo.load();
-
-  // events
   localVideo.addEventListener('loadeddata', () => {
     if (videoEmpty) videoEmpty.classList.add('is-hidden');
     localVideo.classList.add('has-video');
@@ -88,7 +82,6 @@ function setupLocalVideo() {
     localVideo.classList.remove('has-video');
     console.warn('[video] gagal load:', encoded);
   });
-  // jika sudah cached dan ready
   if (localVideo.readyState >= 2) {
     if (videoEmpty) videoEmpty.classList.add('is-hidden');
     localVideo.classList.add('has-video');
@@ -96,17 +89,12 @@ function setupLocalVideo() {
 }
 setupLocalVideo();
 
-// coba putar video setelah user gesture (klik hadiah/kado)
 function tryPlayVideo() {
   if (!localVideo) return;
-  // jika belum ada src, setup lagi
   if (!localVideo.src || localVideo.src.endsWith('/')) setupLocalVideo();
-  // play hanya jika user sudah interaksi, browser izinkan
   const p = localVideo.play();
   if (p && typeof p.catch === 'function') {
-    p.catch(() => {
-      // autoplay dengan suara diblokir wajar, user bisa klik play manual
-    });
+    p.catch(() => {});
   }
 }
 
@@ -135,9 +123,10 @@ document.querySelectorAll('.hearts').forEach((container) => {
   }
 });
 
-// Flow: Welcome -> Gift
-receiveButton.addEventListener('click', () => {
+// Flow: Welcome -> Gift (fix Android/iOS: support both click & touchend, debounce)
+function goToGift() {
   tryPlayVideo();
+  if (welcomeScreen.classList.contains('is-leaving')) return;
   welcomeScreen.classList.add('is-leaving');
   window.setTimeout(() => {
     welcomeScreen.style.display = 'none';
@@ -145,7 +134,21 @@ receiveButton.addEventListener('click', () => {
     giftScreen.classList.add('is-active');
     giftScreen.style.display = 'grid';
   }, 700);
-});
+}
+function bindTap(el, handler) {
+  let touchFired = false;
+  el.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    touchFired = true;
+    handler(e);
+    setTimeout(() => { touchFired = false; }, 600);
+  }, { passive: false });
+  el.addEventListener('click', (e) => {
+    if (touchFired) return;
+    handler(e);
+  });
+}
+if (receiveButton) bindTap(receiveButton, goToGift);
 
 // Flow: Gift -> Memories
 let giftTapped = false;
@@ -159,7 +162,6 @@ function openGift() {
     try { navigator.vibrate(60); } catch(e) {}
   }
   tryPlayVideo();
-
   window.setTimeout(() => {
     giftScreen.classList.add('opened');
     spawnHeartsBurst();
@@ -172,13 +174,11 @@ function openGift() {
       window.setTimeout(() => memoriesScreen.classList.add('visible'), 80);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       spawnHeartsBurst();
-      // pastikan video sudah setup saat sampai memories
       if (localVideo && !localVideo.src) setupLocalVideo();
     }, 1100);
   }, 1800);
 }
-giftButton.addEventListener('click', openGift);
-giftButton.addEventListener('touchend', (e) => { e.preventDefault(); openGift(); }, { passive: false });
+if (giftButton) bindTap(giftButton, openGift);
 
 // Restart + reset gift lock
 if (restartButton) {
@@ -199,8 +199,7 @@ if (restartButton) {
       localVideo.currentTime = 0;
     }
   };
-  restartButton.addEventListener('click', doRestart);
-  restartButton.addEventListener('touchend', (e) => { e.preventDefault(); doRestart(); }, { passive: false });
+  bindTap(restartButton, doRestart);
 }
 
 // iOS/Android viewport height fix
@@ -216,13 +215,7 @@ window.addEventListener('resize', setVH);
 if (window.visualViewport) window.visualViewport.addEventListener('resize', setVH);
 window.addEventListener('orientationchange', () => setTimeout(setVH, 300));
 
-// Prevent double-tap zoom pada tombol (iOS)
-document.addEventListener('touchend', (e) => {
-  const t = e.target;
-  if (t.closest && t.closest('button')) {
-    e.preventDefault();
-  }
-}, { passive: false });
+// Prevent double-tap zoom: handled per-button via bindTap (global prevent removed - was breaking iOS/Android click)
 
 // Cegah scroll bounce di welcome/gift screen (iOS)
 let startY = 0;
